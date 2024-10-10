@@ -1,157 +1,98 @@
+//---------SUBSCRIBER CODE: This code listens for messages on an MQTT topic and performs actions based on the received messages (in your case, flashing an LED).-------
+
 #include <WiFiNINA.h>
 #include <PubSubClient.h>
 
-// Wi-Fi credentials
-const char* ssid = "Airtel_BENIWAL?s";
-const char* password = "HaR@1173";
-
-// MQTT broker credentials
-const char* mqtt_server = "lca10f4d.ala.dedicated.aws.emqxcloud.com";
+// WiFi credentials and MQTT server settings
+const char* ssid = "abcd";           // WiFi SSID
+const char* password = "12345678";     // WiFi password
+const char* mqtt_server = "broker.emqx.io";  // EMQX MQTT broker
 const int mqtt_port = 1883;
-const char* mqtt_user = "hiteshbeniwal";   
-const char* mqtt_pass = "hiteshbeniwal";   
-const char* mqtt_topic_wave = "SIT210/wave";
-const char* mqtt_topic_pat = "SIT210/pat";
-
-// Ultrasonic sensor pins
-const int trigPin = 3;
-const int echoPin = 2;
+const char* mqtt_topic_wave = "SIT210/wave";  // MQTT topic
 
 // LED pin
-const int ledPin = 10;
+const int ledPin = 8;
 
-// Debounce settings
-bool messageSent = false;
-unsigned long lastDebounceTime = 0;
-const long debounceDelay = 1000; 
+// Instances for WiFiClient and PubSubClient
+WiFiClient espClient;
+PubSubClient client(espClient);
 
-// Wi-Fi and MQTT client
-WiFiClient wifiClient;
-PubSubClient client(wifiClient);
+// Function to connect to WiFi
+void connectToWiFi(const char* ssid, const char* password) {
+    Serial.print("Connecting to WiFi");
+    while (WiFi.status() != WL_CONNECTED) {
+        WiFi.begin(ssid, password);
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("\nConnected to the WiFi network");
+}
+
+// Function to flash LED a specified number of times
+void flashLED(int pin, int times, int delayDuration) {
+    for (int i = 0; i < times; i++) {
+        digitalWrite(pin, HIGH);
+        delay(delayDuration);
+        digitalWrite(pin, LOW);
+        delay(delayDuration);
+    }
+}
+
+// Function to handle incoming MQTT messages
+void handleMQTTMessage(char* topic, byte* message, unsigned int length) {
+    Serial.print("Message arrived on topic ");
+    Serial.print(topic);
+    Serial.print(": ");
+    
+    for (unsigned int i = 0; i < length; i++) {
+        Serial.print((char)message[i]);
+    }
+    Serial.println();
+
+    // Flash LED 3 times on message reception
+    flashLED(ledPin, 3, 500);
+}
+
+// Function to connect to MQTT broker and subscribe to a topic
+void connectToMQTT() {
+    while (!client.connected()) {
+        Serial.print("Attempting MQTT connection...");
+        // Attempt to connect with a client ID
+        if (client.connect("ArduinoSubscriber")) {
+            Serial.println("connected to MQTT broker");
+            client.subscribe(mqtt_topic_wave);  // Subscribe to the topic
+            Serial.print("Subscribed to topic: ");
+            Serial.println(mqtt_topic_wave);
+        } else {
+            Serial.print("failed with state: ");
+            Serial.print(client.state());
+            delay(5000);  // Retry every 5 seconds if connection fails
+        }
+    }
+}
 
 void setup() {
-  Serial.begin(9600);
+    // Initialize serial communication for debugging
+    Serial.begin(9600);
 
-  // Pin modes for sensor and LED
-  pinMode(trigPin, OUTPUT);
-  pinMode(echoPin, INPUT);
-  pinMode(ledPin, OUTPUT);
+    // Initialize the LED pin as an output
+    pinMode(ledPin, OUTPUT);
 
-  // Connect to Wi-Fi and MQTT
-  connectWiFi();
-  client.setServer(mqtt_server, mqtt_port);
-  client.setCallback(callback);
-  connectMQTT();
+    // Connect to WiFi
+    connectToWiFi(ssid, password);
+
+    // Set MQTT server and callback function for incoming messages
+    client.setServer(mqtt_server, mqtt_port);
+    client.setCallback(handleMQTTMessage);
 }
 
 void loop() {
-  if (!client.connected()) {
-    connectMQTT();
-  }
-  
-  client.loop();
-  
-  long distance = measureDistance();
-
-  if (shouldSendMessage(distance)) {
-    publishMessage("Hitesh");
-    flashLED(3, 500);
-    messageSent = true;
-    lastDebounceTime = millis();
-  } else if (distance >= 10 || distance == 0) {
-    messageSent = false;
-  }
-
-  delay(1000);
-}
-
-// Function to connect to Wi-Fi
-void connectWiFi() {
-  Serial.print("Connecting to WiFi...");
-  WiFi.begin(ssid, password);
-  
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("Connected to WiFi!");
-  } else {
-    Serial.println("Failed to connect to WiFi.");
-  }
-}
-
-// Function to connect to MQTT
-void connectMQTT() {
-  Serial.print("Connecting to MQTT...");
-  
-  while (!client.connected()) {
-    if (client.connect("ArduinoClient", mqtt_user, mqtt_pass)) {
-      Serial.println("Connected to MQTT!");
-      client.subscribe(mqtt_topic_pat);
-    } else {
-      Serial.print("Failed to connect, rc=");
-      Serial.println(client.state());
-      delay(2000);
+    // Ensure the client is connected to the MQTT broker
+    if (!client.connected()) {
+        connectToMQTT();
     }
-  }
+
+    // Handle incoming MQTT messages
+    client.loop();
 }
 
-// Callback function for incoming MQTT messages
-void callback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message received: ");
-  
-  String message;
-  for (int i = 0; i < length; i++) {
-    message += (char)payload[i];
-  }
-  Serial.println(message);
-
-  // If the topic is for 'pat', flash the LED 5 times
-  if (String(topic) == mqtt_topic_pat) {
-    flashLED(5, 200);
-  }
-}
-
-// Measure distance using ultrasonic sensor
-long measureDistance() {
-  digitalWrite(trigPin, LOW);
-  delayMicroseconds(2);
-  digitalWrite(trigPin, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
-
-  long duration = pulseIn(echoPin, HIGH);
-  long distance = (duration / 2) / 29.1; 
-
-  Serial.print("Distance: ");
-  Serial.println(distance);
-  
-  return distance;
-}
-
-// Check if message should be sent based on distance and debounce time
-bool shouldSendMessage(long distance) {
-  unsigned long currentTime = millis();
-  return (distance < 10 && distance > 0 && !messageSent && (currentTime - lastDebounceTime > debounceDelay));
-}
-
-// Publish MQTT message
-void publishMessage(const char* message) {
-  Serial.print("Publishing message: ");
-  Serial.println(message);
-  client.publish(mqtt_topic_wave, message);
-}
-
-// Flash the LED a given number of times
-void flashLED(int times, int delayTime) {
-  for (int i = 0; i < times; i++) {
-    digitalWrite(ledPin, HIGH);
-    delay(delayTime);
-    digitalWrite(ledPin, LOW);
-    delay(delayTime);
-  }
-}
